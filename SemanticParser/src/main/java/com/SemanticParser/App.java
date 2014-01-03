@@ -1,5 +1,8 @@
 package com.SemanticParser;
 
+import java.io.BufferedReader;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
 import java.sql.Connection;
 import java.sql.DriverManager;
 //import java.sql.ResultSet;
@@ -29,7 +32,7 @@ public class App
     public static void main( String[] args )
     {
     	
-
+/*
     	String sparqlQueryString = "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>"
     			+ "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>"
     			+ "SELECT * WHERE {"
@@ -46,6 +49,30 @@ public class App
     		QuerySolution result = results.next();
     		System.out.println(result.get("subject").toString());
     	}
+    	
+*/
 
+    }
+    
+    public static boolean initPostgres(){
+    	
+    	AccessPostgres db = new AccessPostgres();
+    	String createTblFile = "/home/angelacoconuts/Documents/dev/git/VoyInit/create_table.sql";
+    	String initTblFile = "/home/angelacoconuts/Documents/dev/git/VoyInit/init_table.sql";
+    	
+    	try {
+    		
+			db.execScript(new BufferedReader(new FileReader(createTblFile)));
+			db.execScript(new BufferedReader(new FileReader(initTblFile)));
+			
+			return true;
+			
+    	} catch (FileNotFoundException ex) {
+
+			App.logger.equals(ex.getMessage());
+		}
+    	
+    	return false;
+    	
     }
 }

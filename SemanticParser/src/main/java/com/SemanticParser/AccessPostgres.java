@@ -60,7 +60,7 @@ public class AccessPostgres {
      * No ResultSet return!
      * @param reader
      */
-    public void execSelect(Reader reader){
+    public void execScript(Reader reader){
     	
     	Connection con = getConnection();
         

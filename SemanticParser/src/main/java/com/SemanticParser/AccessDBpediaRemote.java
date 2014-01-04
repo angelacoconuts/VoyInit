@@ -1,10 +1,6 @@
 package com.SemanticParser;
 
 import java.io.ByteArrayOutputStream;
-import java.io.OutputStream;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
 
 import com.hp.hpl.jena.query.ParameterizedSparqlString;
 import com.hp.hpl.jena.query.Query;
@@ -19,9 +15,24 @@ import com.hp.hpl.jena.rdf.model.ModelFactory;
 import com.hp.hpl.jena.rdf.model.RDFNode;
 import com.hp.hpl.jena.sparql.engine.http.QueryExceptionHTTP;
 
-public class AccessDBpedia {
+public class AccessDBpediaRemote {
 
 	private String testEndpointQuery = "ASK { }";
+	final static String DBPEDIA_VIRTUOSO = "http://dbpedia.org/sparql";
+
+	public ResultSet execParameterisedSelect(String serviceEndpoint,
+			String sparqlQueryString, String[] prefixList,
+			String inputVar, String inputVarValue) {
+
+		Query query = createParameterizedQuery(sparqlQueryString, prefixList, inputVar, inputVarValue);
+
+		App.logger.info(query.toString());
+
+		ResultSet results = execSelectQuery(serviceEndpoint, query);
+
+		return results;
+
+	}
 
 	/**
 	 * Fire a SPARQL against service endpoint
@@ -35,7 +46,7 @@ public class AccessDBpedia {
 	 * @return com.hp.hpl.jena.query.ResultSet
 	 */
 	public ResultSet execSimpleSelect(String serviceEndpoint,
-			String sparqlQueryString, List<String> prefixList) {
+			String sparqlQueryString, String[] prefixList) {
 
 		Query query = createSimpleQuery(sparqlQueryString, prefixList);
 
@@ -45,20 +56,15 @@ public class AccessDBpedia {
 
 	}
 
-	public Query createParameterizedQuery(String sparqlQueryString,
-			List<String> prefixList, Map<String, String> initialBindingSet) {
+	private Query createParameterizedQuery(String sparqlQueryString,
+			String[] prefixList, String inputVar, String inputVarValue) {
 
 		Model model = ModelFactory.createDefaultModel();
 
 		QuerySolutionMap initialBindings = new QuerySolutionMap();
 
-		for (Map.Entry<String, String> bindingEntry : initialBindingSet
-				.entrySet()) {
-
-			RDFNode bindingNode = model.createResource(bindingEntry.getValue());
-			initialBindings.add(bindingEntry.getKey(), bindingNode);
-
-		}
+		RDFNode bindingNode = model.createResource(inputVarValue);
+		initialBindings.add(inputVar, bindingNode);
 
 		ParameterizedSparqlString queryStr = new ParameterizedSparqlString(
 				sparqlQueryString, initialBindings);
@@ -70,8 +76,8 @@ public class AccessDBpedia {
 
 	}
 
-	public Query createSimpleQuery(String sparqlQueryString,
-			List<String> prefixList) {
+	private Query createSimpleQuery(String sparqlQueryString,
+			String[] prefixList) {
 
 		ParameterizedSparqlString queryStr = new ParameterizedSparqlString(
 				sparqlQueryString);
@@ -83,28 +89,29 @@ public class AccessDBpedia {
 		return query;
 	}
 
-	public ResultSet execSelectQuery(String serviceEndpoint, Query query) {
+	private ResultSet execSelectQuery(String serviceEndpoint, Query query) {
 
 		ResultSet results = null;
-		ByteArrayOutputStream logWriter = new ByteArrayOutputStream();
-
+//		ByteArrayOutputStream logWriter = new ByteArrayOutputStream();
+			
 		QueryExecution qexec = QueryExecutionFactory.sparqlService(
 				serviceEndpoint, query);
 
+		App.logger.info("Executing query: "+query.toString());
 		results = qexec.execSelect();
-		
-		ResultSetFormatter.out(logWriter, results, query);
-		App.logger.debug(logWriter.toString());
+
+//		ResultSetFormatter.out(logWriter, results, query);
+//		App.logger.info(logWriter.toString());
 
 		return results;
 
 	}
 
-	public ParameterizedSparqlString setPrefixes(
-			ParameterizedSparqlString queryStr, List<String> prefixList) {
+	private ParameterizedSparqlString setPrefixes(
+			ParameterizedSparqlString queryStr, String[] prefixList) {
 
-		for (String prefix : prefixList)
-			queryStr.setNsPrefix(prefix, App.prefixMap.get(prefix));
+		for (int i = 0; i< prefixList.length; i++)
+			queryStr.setNsPrefix(prefixList[i], VoyInit.prefixMap.get(prefixList[i]));
 
 		return queryStr;
 

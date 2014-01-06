@@ -84,8 +84,8 @@ public class AccessPostgres {
 			result = st.executeQuery(queryString);
 
 			if (result.isBeforeFirst()) {
-				App.logger.info("Retrieve successfully from " + DBurl);
-				App.logger.info("SQL Query: " + queryString);
+				App.logger.debug("Retrieve successfully from " + DBurl);
+				App.logger.debug("SQL Query: " + queryString);
 			}
 
 			return result;
@@ -132,8 +132,8 @@ public class AccessPostgres {
 			result = st.executeUpdate(updateString);
 
 			if (result >= 0) {
-				App.logger.info("Update successful to " + DBurl);
-				App.logger.info(updateString);
+				App.logger.debug("Update successful to " + DBurl);
+				App.logger.debug(updateString);
 			}
 			return result;
 

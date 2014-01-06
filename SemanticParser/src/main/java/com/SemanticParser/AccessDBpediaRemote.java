@@ -26,8 +26,6 @@ public class AccessDBpediaRemote {
 
 		Query query = createParameterizedQuery(sparqlQueryString, prefixList, inputVar, inputVarValue);
 
-		App.logger.info(query.toString());
-
 		ResultSet results = execSelectQuery(serviceEndpoint, query);
 
 		return results;
@@ -93,11 +91,11 @@ public class AccessDBpediaRemote {
 
 		ResultSet results = null;
 //		ByteArrayOutputStream logWriter = new ByteArrayOutputStream();
-			
+
 		QueryExecution qexec = QueryExecutionFactory.sparqlService(
 				serviceEndpoint, query);
-
-		App.logger.info("Executing query: "+query.toString());
+		
+		App.logger.debug("Executing query: "+query.toString());
 		results = qexec.execSelect();
 
 //		ResultSetFormatter.out(logWriter, results, query);
@@ -131,13 +129,19 @@ public class AccessDBpediaRemote {
 				serviceEndpoint, query);
 
 		try {
+			
 			if (qexec.execAsk()) {
+				
 				App.logger.info(serviceEndpoint + " is UP!");
 				return true;
+				
 			}
+			
 		} catch (QueryExceptionHTTP e) {
+			
 			App.logger.error(serviceEndpoint + " is DOWN!");
 			return false;
+			
 		}
 		return false;
 

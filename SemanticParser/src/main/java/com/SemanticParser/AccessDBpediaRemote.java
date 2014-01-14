@@ -1,7 +1,5 @@
 package com.SemanticParser;
 
-import java.io.ByteArrayOutputStream;
-
 import com.hp.hpl.jena.query.ParameterizedSparqlString;
 import com.hp.hpl.jena.query.Query;
 import com.hp.hpl.jena.query.QueryExecution;
@@ -9,7 +7,6 @@ import com.hp.hpl.jena.query.QueryExecutionFactory;
 import com.hp.hpl.jena.query.QueryFactory;
 import com.hp.hpl.jena.query.QuerySolutionMap;
 import com.hp.hpl.jena.query.ResultSet;
-import com.hp.hpl.jena.query.ResultSetFormatter;
 import com.hp.hpl.jena.rdf.model.Model;
 import com.hp.hpl.jena.rdf.model.ModelFactory;
 import com.hp.hpl.jena.rdf.model.RDFNode;
@@ -21,10 +18,11 @@ public class AccessDBpediaRemote {
 	final static String DBPEDIA_VIRTUOSO = "http://dbpedia.org/sparql";
 
 	public ResultSet execParameterisedSelect(String serviceEndpoint,
-			String sparqlQueryString, String[] prefixList,
-			String inputVar, String inputVarValue) {
+			String sparqlQueryString, String[] prefixList, String inputVar,
+			String inputVarValue) {
 
-		Query query = createParameterizedQuery(sparqlQueryString, prefixList, inputVar, inputVarValue);
+		Query query = createParameterizedQuery(sparqlQueryString, prefixList,
+				inputVar, inputVarValue);
 
 		ResultSet results = execSelectQuery(serviceEndpoint, query);
 
@@ -69,6 +67,8 @@ public class AccessDBpediaRemote {
 
 		setPrefixes(queryStr, prefixList);
 
+		// App.logger.info(queryStr.toString());
+
 		Query query = queryStr.asQuery();
 		return query;
 
@@ -89,17 +89,31 @@ public class AccessDBpediaRemote {
 
 	private ResultSet execSelectQuery(String serviceEndpoint, Query query) {
 
-		ResultSet results = null;
-//		ByteArrayOutputStream logWriter = new ByteArrayOutputStream();
+		// ByteArrayOutputStream logWriter = new ByteArrayOutputStream();
 
 		QueryExecution qexec = QueryExecutionFactory.sparqlService(
 				serviceEndpoint, query);
-		
-		App.logger.debug("Executing query: "+query.toString());
-		results = qexec.execSelect();
+		ResultSet results = null;
 
-//		ResultSetFormatter.out(logWriter, results, query);
-//		App.logger.info(logWriter.toString());
+		App.logger.debug("Executing query: " + query.toString());
+
+		try {
+
+			// long startDBpediaTime = System.currentTimeMillis();
+
+			results = qexec.execSelect();
+
+			// App.logger.info("DBpedia access time: " +
+			// (System.currentTimeMillis() - startDBpediaTime));
+
+		} catch (Exception ex) {
+
+			App.logger.error("Access DBpedia remote encountered error!", ex);
+
+		}
+
+		// ResultSetFormatter.out(logWriter, results, query);
+		// App.logger.info(logWriter.toString());
 
 		return results;
 
@@ -108,8 +122,9 @@ public class AccessDBpediaRemote {
 	private ParameterizedSparqlString setPrefixes(
 			ParameterizedSparqlString queryStr, String[] prefixList) {
 
-		for (int i = 0; i< prefixList.length; i++)
-			queryStr.setNsPrefix(prefixList[i], VoyInit.prefixMap.get(prefixList[i]));
+		for (int i = 0; i < prefixList.length; i++)
+			queryStr.setNsPrefix(prefixList[i],
+					VoyInit.prefixMap.get(prefixList[i]));
 
 		return queryStr;
 
@@ -129,19 +144,19 @@ public class AccessDBpediaRemote {
 				serviceEndpoint, query);
 
 		try {
-			
+
 			if (qexec.execAsk()) {
-				
+
 				App.logger.info(serviceEndpoint + " is UP!");
 				return true;
-				
+
 			}
-			
+
 		} catch (QueryExceptionHTTP e) {
-			
+
 			App.logger.error(serviceEndpoint + " is DOWN!");
 			return false;
-			
+
 		}
 		return false;
 

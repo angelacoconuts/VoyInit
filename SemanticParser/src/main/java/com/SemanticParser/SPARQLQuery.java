@@ -14,7 +14,7 @@ public class SPARQLQuery {
 	
 	private String[] outputVariables = null;
 	
-	private String[] outputRelations = null;
+	private String outputRelation = null;
 
 	public String getQueryStr() {
 		return queryStr;
@@ -56,12 +56,12 @@ public class SPARQLQuery {
 		this.outputVariables = outputVariables;
 	}
 
-	public String[] getOutputRelations() {
-		return outputRelations;
+	public String getOutputRelation() {
+		return outputRelation;
 	}
 
-	public void setOutputRelations(String[] outputRelations) {
-		this.outputRelations = outputRelations;
+	public void setOutputRelation(String outputRelation) {
+		this.outputRelation = outputRelation;
 	}
 
 	public String getInputVariableValue() {

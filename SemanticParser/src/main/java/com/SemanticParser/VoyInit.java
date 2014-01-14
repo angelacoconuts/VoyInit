@@ -7,18 +7,21 @@ import java.net.URI;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
+import net.sf.json.JSONObject;
+
+import com.hp.hpl.jena.query.QuerySolution;
+import com.hp.hpl.jena.query.ResultSet;
+import com.hp.hpl.jena.rdf.model.RDFNode;
 import com.sun.jersey.api.client.ClientHandlerException;
 import com.sun.jersey.api.client.UniformInterfaceException;
-
-import net.sf.json.JSONObject;
 
 public class VoyInit {
 
 	static final String POSTGRES_QUERY_GET_PREFIX = "SELECT * FROM VOYPREFIX";
 	static final String POSTGRES_QUERY_GET_QUERIES = "SELECT * FROM VOYQUERY";
-	static final String POSTGRES_QUERY_GET_QUERY_DATA = "SELECT * FROM VOYQUERY_DATA";
 	static final String POSTGRES_QUERY_UPDATE_QUERY_DATA = "INSERT INTO VOYQUERY_DATA VALUES";
 	static final String PREFIX_COLUMN = "PREFIX";
 	static final String URI_COLUMN = "URI";
@@ -28,22 +31,22 @@ public class VoyInit {
 	static final String INPUT_VAR_COLUMN = "INPUT_VAR";
 	static final String OUTPUT_VAR_COLUMN = "OUTPUT_VAR";
 	static final String OUTPUT_REl_COLUMN = "OUTPUT_REL";
+	static final String POSTGRES_QUERY_GET_QUERY_DATA = "SELECT DISTINCT "
+			+ URI_COLUMN + " FROM VOYQUERY_DATA";
 	static final String VAR_DELIMITOR = ";";
 
 	static Map<String, String> prefixMap = null;
 	AccessPostgres db = null;
 
-	public void run() {
-
+	public VoyInit() {
 		db = new AccessPostgres();
+	}
 
-		// fallbackPostgres();
-		// initPostgres();
-		// initNeo4j();
+	public void run(String querySeqCondition) {
 
 		ArrayList<SPARQLQuery> queries = null;
 		buildPrefixMapping();
-		queries = getSPARQLQueries(" WHERE SEQ=1");
+		queries = getSPARQLQueries(querySeqCondition);
 		executeSPARQLQueriesRemote(queries);
 
 	}
@@ -97,6 +100,7 @@ public class VoyInit {
 		try {
 			// Create index
 			neo4j.createIndex("poi", "uri");
+			neo4j.createIndex("poi", "label_en");
 
 		} catch (UniformInterfaceException ex) {
 
@@ -190,6 +194,9 @@ public class VoyInit {
 
 			while (result.next()) {
 
+				App.logger.info("Executing query : "
+						+ (String) result.getObject(QUERY_COLUMN));
+
 				inputVar = (String) result.getObject(INPUT_VAR_COLUMN);
 
 				if (inputVar.equals("")) {
@@ -265,8 +272,8 @@ public class VoyInit {
 			query.setOutputVariables(((String) result
 					.getObject(OUTPUT_VAR_COLUMN)).split(VAR_DELIMITOR));
 
-			query.setOutputRelations(((String) result
-					.getObject(OUTPUT_REl_COLUMN)).split(VAR_DELIMITOR));
+			query.setOutputRelation((String) result
+					.getObject(OUTPUT_REl_COLUMN));
 
 			return query;
 
@@ -286,7 +293,7 @@ public class VoyInit {
 		com.hp.hpl.jena.query.ResultSet SPARQLresult = null;
 
 		for (SPARQLQuery query : queries) {
-			
+
 			long startSPARQLQueryTime = System.currentTimeMillis();
 
 			if (query.getInputVariable() == null)
@@ -301,12 +308,12 @@ public class VoyInit {
 								query.getInputVariable(),
 								query.getInputVariableValue());
 			}
-			
 
 			App.logger.info("Queried dbpedia remote in milliseconds: "
 					+ (System.currentTimeMillis() - startSPARQLQueryTime));
 
 			parseSPARQLResult(SPARQLresult, query);
+
 		}
 
 	}
@@ -318,33 +325,129 @@ public class VoyInit {
 
 		if (query.getIsLeaveQuery() == 0) {
 
-			while (SPARQLresult.hasNext()) {
+			List<String> resultList = getResultSetColumnURI(SPARQLresult,
+					outputClass);
+
+			for (String uri : resultList) {
 
 				long startNodeInsertTime = System.currentTimeMillis();
-
-				String uri = SPARQLresult.next()
-						.getResource(query.getOutputVariables()[0]).getURI();
 
 				// Parameters : (String uri, String input_var)
 				// Insert output into VOYQUERY_DATA to be used as input for next
 				// iteration
 				insertQueryDataEntry(uri, outputClass);
 
-				// Parameters : (String nodeURIStr, String nodeClass, String
-				// parentURIStr, String parentClass)
+				// Parameters : (String outputNodeURIStr,
+				// String outputNodeClass, String inputNodeURIStr,
+				// String inputNodeClass, String outputRelation)
 				insertNewNodeNeo4j(uri, outputClass,
-						query.getInputVariableValue(), query.getInputVariable());
+						query.getInputVariableValue(),
+						query.getInputVariable(), query.getOutputRelation());
 
-				App.logger.info("Inserted new node in milliseconds: "
+				App.logger.info("Processed node in milliseconds: "
 						+ (System.currentTimeMillis() - startNodeInsertTime));
-				
+
 			}
 		}
 
 		else {
-			// Insert relationship, node into Neo4j
-			// Insert attribute from SPARQL query result to Neo4j node
+
+			long startNodeTime = System.currentTimeMillis();
+
+			addLeaveNodeAttributes(SPARQLresult, query);
+
+			App.logger.info("Add node attributes in milliseconds: "
+					+ (System.currentTimeMillis() - startNodeTime));
+
 		}
+	}
+
+	private void addLeaveNodeAttributes(
+			com.hp.hpl.jena.query.ResultSet SPARQLresult, SPARQLQuery query) {
+
+		// Leave node
+		// Insert attribute from SPARQL query result to Neo4j node
+		AccessNeo4j neo4j = new AccessNeo4j();
+		String[] outputVarList = query.getOutputVariables();
+		URI leaveNode = getNodeLocationByURIStr(query.getInputVariableValue());
+
+		App.logger.info("Add attributes to : " + query.getInputVariableValue());
+
+		try {
+			if (outputVarList.length != 1) {
+
+				// A list of attributes in one row
+				while (SPARQLresult.hasNext()) {
+
+					QuerySolution result = SPARQLresult.next();
+					// A list of attributes in one row
+					for (int i = 0; i < outputVarList.length; i++) {
+
+						RDFNode attributeNode = result.get(outputVarList[i]);
+
+						if (attributeNode != null) {
+
+							// long startNeo4jTime = System.currentTimeMillis();
+
+							neo4j.addProperty(leaveNode, outputVarList[i],
+									attributeNode.toString());
+
+							// App.logger.info("Neo4j access time: "+
+							// (System.currentTimeMillis() - startNeo4jTime));
+
+						}
+
+					}
+				}
+
+			} else {
+
+				List<String> outputValueList = new ArrayList<String>();
+
+				// Multiple rows containing one attributes e.g: list of links
+				while (SPARQLresult.hasNext()) {
+					outputValueList.add("\\\""
+							+ SPARQLresult.next().get(outputVarList[0])
+									.toString() + "\\\"");
+				}
+
+				neo4j.addProperty(leaveNode, outputVarList[0],
+						outputValueList.toString());
+
+			}
+
+		} catch (UniformInterfaceException ex) {
+
+			App.logger.error("Bad Request!", ex);
+
+		} catch (ClientHandlerException ex) {
+
+			App.logger.error("Connection refused, server may be down", ex);
+
+		}
+	}
+
+	private List<String> getResultSetColumnURI(ResultSet queryResult,
+			String columnName) {
+
+		List<String> resultURIList = new ArrayList<String>();
+
+		try {
+
+			while (queryResult.hasNext()) {
+				String uri = queryResult.next().getResource(columnName)
+						.getURI();
+				resultURIList.add(uri);
+			}
+
+		} catch (Exception ex) {
+
+			App.logger.error("Error getting resource from SPARQL query", ex);
+
+		}
+
+		return resultURIList;
+
 	}
 
 	private void insertQueryDataEntry(String uri, String input_var) {
@@ -360,57 +463,62 @@ public class VoyInit {
 
 	}
 
-	private void insertNewNodeNeo4j(String nodeURIStr, String nodeClass,
-			String parentURIStr, String parentClass) {
+	private void insertNewNodeNeo4j(String outputNodeURIStr,
+			String outputNodeClass, String inputNodeURIStr,
+			String inputNodeClass, String outputRelation) {
 
-		JSONObject queryResp = null;
-		URI newNode = null;
 		AccessNeo4j neo4j = new AccessNeo4j();
 
 		try {
 
+			URI outputNode = getNodeLocationByURIStr(outputNodeURIStr);
+
 			// Check if node exist in Neo4j or not
-			queryResp = neo4j.executeCypherQuery("MATCH (n:poi { uri: '"
-					+ nodeURIStr + "' }) RETURN n");
 
-			ArrayList<JSONObject> resultList = (ArrayList<JSONObject>) neo4j
-					.getCypherResponseAttribute(queryResp, "self",
-							JSONObject.class);
-
-			if (resultList.size() == 0) {
+			if (outputNode == null) {
 
 				// Insert new node into Neo4j
 				String nodeProperties = new JSONObject()
-						.element("uri", nodeURIStr).element("class", nodeClass)
-						.toString();
+						.element("uri", outputNodeURIStr)
+						.element("class", outputNodeClass).toString();
 
-				newNode = neo4j.createNode("poi", nodeProperties);
-				App.logger.debug("Add node : " + nodeURIStr);
+				outputNode = neo4j.createNode("poi", nodeProperties);
+				App.logger.info("Add node : " + outputNodeURIStr);
 
-				// Get parent node according to input variable and input
-				// variable uri
-				queryResp = neo4j.executeCypherQuery("MATCH (n:poi { uri: '"
-						+ parentURIStr + "' }) RETURN n");
+			}
 
-				ArrayList<String> resultListStr = (ArrayList<String>) neo4j
-						.getCypherResponseAttribute(queryResp, "self",
-								String.class);
+			// Get parent node according to input variable and input variable
+			// uri
 
-				if (resultListStr.size() != 0) {
+			URI inputNode = getNodeLocationByURIStr(inputNodeURIStr);
 
-					URI parentNode = URI.create(resultListStr.get(0));
+			if (inputNode != null) {
+
+				if (outputRelation.toUpperCase().equals("BELONGS")) {
+
 					String relationProperties = new JSONObject().element(
-							"parent_class", parentClass).toString();
+							"parent_class", inputNodeClass).toString();
 
-					neo4j.addRelationship(newNode, parentNode, "BELONGS",
+					neo4j.addRelationship(outputNode, inputNode, "BELONGS",
 							relationProperties);
 
-					App.logger.debug(String.format(
-							"Add relationship from [%s] to [%s]",
-							newNode.toString(), parentNode.toString()));
+					// App.logger.info(String.format("Add BELONGS relationship from [%s] to [%s]",
+					// outputNode.toString(), inputNode.toString()));
+
 				}
-			} else {
-				// Add attribute to the existing node
+
+				else if (outputRelation.toUpperCase().equals("CONTAINS")) {
+
+					String relationProperties = new JSONObject().element(
+							"parent_class", outputNodeClass).toString();
+
+					neo4j.addRelationship(inputNode, outputNode, "BELONGS",
+							relationProperties);
+
+					// App.logger.info(String.format("Add BELONGS relationship from [%s] to [%s]",
+					// inputNode.toString(), outputNode.toString()));
+
+				}
 			}
 
 		} catch (UniformInterfaceException ex) {
@@ -422,6 +530,36 @@ public class VoyInit {
 			App.logger.error("Connection refused, server may be down", ex);
 
 		}
+
+	}
+
+	private URI getNodeLocationByURIStr(String URIString) {
+
+		AccessNeo4j neo4j = new AccessNeo4j();
+
+		try {
+
+			JSONObject queryResp = neo4j.executeCypherQuery(
+					"MATCH (n:poi { uri: \"" + URIString + "\" }) RETURN n",
+					"{}");
+
+			ArrayList<String> nodeLocation = (ArrayList<String>) neo4j
+					.getCypherResponseAttribute(queryResp, "self", String.class);
+
+			if (nodeLocation.size() != 0) {
+				// Node found
+				URI node = URI.create(nodeLocation.get(0));
+				return node;
+
+			}
+
+		} catch (UniformInterfaceException ex) {
+			App.logger.error("Bad Request!", ex);
+		} catch (ClientHandlerException ex) {
+			App.logger.error("Connection refused, server may be down", ex);
+		}
+
+		return null;
 
 	}
 }

@@ -10,7 +10,6 @@ import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 
 import com.sun.jersey.api.client.Client;
-import com.sun.jersey.api.client.ClientHandlerException;
 import com.sun.jersey.api.client.ClientResponse;
 import com.sun.jersey.api.client.UniformInterfaceException;
 import com.sun.jersey.api.client.WebResource;
@@ -59,7 +58,7 @@ public class AccessNeo4j {
 
 		ClientResponse response = postToEndpoint(CypherEntryURI,
 				cypherCreateNodeStr);
-		
+
 		String responseStr = response.getEntity(String.class);
 
 		ArrayList<String> strResult = (ArrayList<String>) getCypherResponseAttribute(
@@ -85,10 +84,10 @@ public class AccessNeo4j {
 	 * @param queryString
 	 * @return
 	 */
-	public JSONObject executeCypherQuery(String queryString) {
+	public JSONObject executeCypherQuery(String queryString, String queryParams) {
 
 		String cypherQueryStr = new JSONObject().element("query", queryString)
-				.element("params", "{}").toString();
+				.element("params", queryParams).toString();
 
 		ClientResponse response = postToEndpoint(CypherEntryURI, cypherQueryStr);
 
@@ -149,8 +148,7 @@ public class AccessNeo4j {
 				.type(MediaType.APPLICATION_JSON)
 				.entity("\"" + propertyValue + "\"").put(ClientResponse.class);
 
-		App.logger.debug(String.format("PUT to [%s], status code [%d]",
-				propertyURI, response.getStatus()));
+		App.logger.debug(String.format("PUT to [%s], status code [%d]", propertyURI, response.getStatus()));
 
 		if (response.getStatus() >= 300) {
 			App.logger.error(String.format("PUT to [%s], status code [%d]",

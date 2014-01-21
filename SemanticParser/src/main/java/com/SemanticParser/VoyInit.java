@@ -20,9 +20,11 @@ import com.sun.jersey.api.client.UniformInterfaceException;
 
 public class VoyInit {
 
-	static final String POSTGRES_QUERY_GET_PREFIX = "SELECT * FROM VOYPREFIX";
-	static final String POSTGRES_QUERY_GET_QUERIES = "SELECT * FROM VOYQUERY";
-	static final String POSTGRES_QUERY_UPDATE_QUERY_DATA = "INSERT INTO VOYQUERY_DATA VALUES";
+	static final String POSTGRES_GET_PREFIX = "SELECT * FROM VOYPREFIX ";
+	static final String POSTGRES_GET_QUERIES = "SELECT * FROM VOYQUERY ";
+	static final String POSTGRES_GET_QUERY_DATA = "SELECT * FROM VOYQUERY_DATA ";
+	static final String POSTGRES_UPDATE_QUERY_DATA = "INSERT INTO VOYQUERY_DATA VALUES";
+	
 	static final String PREFIX_COLUMN = "PREFIX";
 	static final String URI_COLUMN = "URI";
 	static final String SEQ_COLUMN = "SEQ";
@@ -31,8 +33,6 @@ public class VoyInit {
 	static final String INPUT_VAR_COLUMN = "INPUT_VAR";
 	static final String OUTPUT_VAR_COLUMN = "OUTPUT_VAR";
 	static final String OUTPUT_REl_COLUMN = "OUTPUT_REL";
-	static final String POSTGRES_QUERY_GET_QUERY_DATA = "SELECT DISTINCT "
-			+ URI_COLUMN + " FROM VOYQUERY_DATA";
 	static final String VAR_DELIMITOR = ";";
 
 	static Map<String, String> prefixMap = null;
@@ -114,7 +114,7 @@ public class VoyInit {
 
 		// Insert continent nodes
 		java.sql.ResultSet result = db
-				.execSelect(POSTGRES_QUERY_GET_QUERY_DATA);
+				.execSelect(POSTGRES_GET_QUERY_DATA);
 
 		try {
 
@@ -153,7 +153,7 @@ public class VoyInit {
 
 		prefixMap = new HashMap<String, String>();
 
-		java.sql.ResultSet result = db.execSelect(POSTGRES_QUERY_GET_PREFIX);
+		java.sql.ResultSet result = db.execSelect(POSTGRES_GET_PREFIX);
 
 		try {
 
@@ -185,7 +185,7 @@ public class VoyInit {
 		SPARQLQuery query = null;
 		String inputVar = null;
 
-		java.sql.ResultSet result = db.execSelect(POSTGRES_QUERY_GET_QUERIES
+		java.sql.ResultSet result = db.execSelect(POSTGRES_GET_QUERIES
 				+ queriesCondition);
 
 		try {
@@ -214,7 +214,7 @@ public class VoyInit {
 					// Input variable required, select from VOYQUERY_DATA and
 					// iterate through variables
 					inputVarValues = db
-							.execSelect(POSTGRES_QUERY_GET_QUERY_DATA
+							.execSelect(POSTGRES_GET_QUERY_DATA
 									+ " WHERE " + INPUT_VAR_COLUMN + "='"
 									+ inputVar + "'");
 
@@ -455,7 +455,7 @@ public class VoyInit {
 		// Insert interim result into voyquery_data table
 		if (!input_var.equals("")) {
 
-			String insert_str = POSTGRES_QUERY_UPDATE_QUERY_DATA + "('"
+			String insert_str = POSTGRES_UPDATE_QUERY_DATA + "('"
 					+ uri.replace("'", "''") + "','" + input_var + "');";
 			db.execUpdate(insert_str);
 

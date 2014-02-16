@@ -1,0 +1,8 @@
+prefix,uri
+rdf,http://www.w3.org/1999/02/22-rdf-syntax-ns#
+rdfs,http://www.w3.org/2000/01/rdf-schema#
+dbpedia-owl,http://dbpedia.org/ontology/
+foaf,http://xmlns.com/foaf/0.1/
+dcterms,http://purl.org/dc/terms/
+skos,http://www.w3.org/2004/02/skos/core#
+geo,http://www.w3.org/2003/01/geo/wgs84_pos#

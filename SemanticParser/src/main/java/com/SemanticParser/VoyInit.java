@@ -10,6 +10,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.commons.lang.StringUtils;
+
 import net.sf.json.JSONObject;
 
 import com.hp.hpl.jena.query.QuerySolution;
@@ -561,5 +563,84 @@ public class VoyInit {
 
 		return null;
 
+	}
+	
+	public void loadGEONamesCountries(){
+		
+		AccessNeo4j neo4j = new AccessNeo4j();
+				
+		java.sql.ResultSet result = db
+				.execSelect("SELECT COUNTRY_NAME FROM VOYCOUNTRIES;");
+
+		try {
+
+			while (result.next()) {
+
+				String countryName = (String) result.getObject("COUNTRY_NAME");
+
+				String mergeNodeQuery = String.format("{ \"query\":\"MERGE (n:[%s] { uri:[%s], class:[%s] }) RETURN n\" }"
+						,"poi"
+						,"'http://dbpedia.org/resource/"+StringUtils.replace(countryName, " ","_") + "'"
+						,"'country'");
+				
+				URI node = neo4j.mergeNode(mergeNodeQuery);
+				
+				App.logger.info(node.toString());
+
+			}
+			
+		}catch (SQLException ex) {
+
+			App.logger.error("SQL Exception: ", ex);
+
+		}catch (UniformInterfaceException ex) {
+
+			App.logger.error("Bad Request!", ex);
+			
+		}
+		
+	}
+	
+	public void loadGEONamesCities(){
+		
+		AccessNeo4j neo4j = new AccessNeo4j();
+				
+		java.sql.ResultSet result = db
+				.execSelect("SELECT CITY_NAME, COUNTRY_NAME"
+						+ " FROM VOYCITIES a, VOYCOUNTRIES b"
+						+ " WHERE a.COUNTRY_CD = b.COUNTRY_CD;");
+
+		try {
+
+			while (result.next()) {
+
+				String countryURI = "'http://dbpedia.org/resource/"+StringUtils.replace((String) result.getObject("COUNTRY_NAME"), " ","_") + "'";
+				String cityURI = "'http://dbpedia.org/resource/"+StringUtils.replace(StringUtils.replace((String) result.getObject("CITY_NAME"), " ","_"),"'","\\\\'") + "'";
+
+				String mergeNodeQuery = String.format("{ \"query\":\" MATCH (p:poi { uri:%s, class:'country' })"
+						+ " MERGE (c:poi { uri:%s })"
+						+ " -[:BELONGS]-> (p)"
+						+ " ON CREATE SET c.class='city'"
+						+ " ON MATCH SET c.class='city'"
+						+ " RETURN c\" }"
+						,countryURI
+						,cityURI);
+				
+				URI node = neo4j.mergeNode(mergeNodeQuery);
+				
+				App.logger.info(node.toString());
+
+			}
+			
+		}catch (SQLException ex) {
+
+			App.logger.error("SQL Exception: ", ex);
+
+		}catch (UniformInterfaceException ex) {
+
+			App.logger.error("Bad Request!", ex);
+			
+		}
+		
 	}
 }

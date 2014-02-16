@@ -78,6 +78,31 @@ public class AccessNeo4j {
 
 	}
 
+	
+	public URI mergeNode(String cypherMergeNodeStr) throws UniformInterfaceException{
+
+		ClientResponse response = postToEndpoint(CypherEntryURI,
+				cypherMergeNodeStr);
+
+		String responseStr = response.getEntity(String.class);
+
+		ArrayList<String> strResult = (ArrayList<String>) getCypherResponseAttribute(
+				JSONObject.fromObject(responseStr), "self", String.class);
+
+		if (strResult.size() != 0) {
+
+			String nodeLocationStr = strResult.get(0);
+			App.logger.debug("Node location :" + nodeLocationStr);
+			response.close();
+
+			return URI.create(nodeLocationStr);
+		}
+
+		response.close();
+		return null;
+
+	}
+	
 	/**
 	 * Call neo4j endpoint and execute cypher query
 	 * 

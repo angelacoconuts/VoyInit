@@ -33,33 +33,3 @@ CREATE TABLE VOYPREFIX(
 PREFIX varchar(50),
 URI varchar(100)
 );
-
-CREATE TABLE VOYLINKAGE(
-ENTITY_1 varchar(200) NOT NULL,
-ENTITY_2 varchar(200) NOT NULL, 
-PAGE_URI varchar(300),
-DISTANCE int
-);
-
-CREATE TABLE VOYCITIES(
-CITY_NAME varchar(100),
-LATITUDE double precision,
-LONGTITUDE double precision,
-COUNTRY_CD varchar(2),
-POPULATION int,
-);
-
-CREATE TABLE VOYCOUNTRIES(
-COUNTRY_CD varchar(2),
-COUNTRY_NAME varchar(100),
-CAPITAL varchar(100),
-AREA int,
-POPULATION int,
-CONTINENT varchar(2),
-CURRENCY varchar(3)
-);
-
-CREATE TABLE VOYPAGECONTEXT(
-PAGE_URI varchar(300),
-CONTEXT varchar(10000)
-);

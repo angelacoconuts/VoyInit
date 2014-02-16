@@ -1,14 +1,16 @@
 package com.SemanticParser;
 
-import java.io.UnsupportedEncodingException;
 import java.net.URISyntaxException;
-import java.sql.Array;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.apache.commons.lang3.StringUtils;
@@ -16,36 +18,45 @@ import org.apache.lucene.search.spell.JaroWinklerDistance;
 
 public class VoyNGram {
 
-	static final String POSTGRES_GET_LABEL = "SELECT * FROM VOYLABEL ";
-	static final String POSTGRES_GET_LABEL_NGRAM = "SELECT * FROM VOYLABEL_NGRAM ";
-	static final String POSTGRES_UPDATE_LABEL_NGRAM = "INSERT INTO VOYLABEL_NGRAM VALUES";
+	final String POSTGRES_GET_LABEL = "SELECT * FROM VOYLABEL ";
+	final String POSTGRES_GET_LABEL_NGRAM = "SELECT * FROM VOYLABEL_NGRAM ";
+	final String POSTGRES_UPDATE_LABEL_NGRAM = "INSERT INTO VOYLABEL_NGRAM VALUES";
 
-	static final String ID_COLUMN = "ID";
-	static final String LABEL_COLUMN = "LABEL";
-	static final String URI_COLUMN = "URI";
-	static final String LABEL_ID_COLUMN = "LABEL_ID";
+	final String ID_COLUMN = "ID";
+	final String LABEL_COLUMN = "LABEL";
+	final String NGRAM_COLUMN = "NGRAM";
+	final String URI_COLUMN = "URI";
+	final String LABEL_ID_COLUMN = "LABEL_ID";
 
-	static int ngramDegree = 3;
+	public static int defaultNGramDegree = 3;
+	public static int defaultShortlistCandidateNr = 60;
+	public static float defaultFuzzyMatchThreshold = (float) 0.97;
+	private float JWDistanceBoostThreshold = (float) 0.7;
+
+	private int defaultDiscardExcpCommonPrefix = 2;
+	private float defaultDiscardThreshold = (float) 0.8;
+	private String inputContextString = "";
+
+	public static Map<String, ArrayList<String>> labelNGramDict;
+	public static Map<Integer, String> labelIDNameMap;
+
+	private JaroWinklerDistance JWStringDistance = null;
+	private AccessPostgres db = null;
 	private String matchResult, nextMatchResult;
-	static int fuzzyMatchThreshold = 2;
-	static int candidateListThreshold = 20;
-
-	private JaroWinklerDistance JWStringDistance;
-
-	float discardThreshold = (float) 0.8;
-	float acceptThreshold = (float) 0.96;
-
-	AccessPostgres db = null;
+	private String[] tokens;
+	private List<String> outputTokens;
 
 	public VoyNGram() {
 		db = new AccessPostgres();
 		JWStringDistance = new JaroWinklerDistance();
+		JWStringDistance.setThreshold(JWDistanceBoostThreshold);
 	}
 
-	public void indexPOIDict() {
+	public void generatePlaceEntitiesDictNGram() {
 
 		int lowerBound = 0;
-		int midPointer = 10000;
+		int transactStep = 100;
+		int interBound = transactStep;
 
 		try {
 
@@ -55,18 +66,21 @@ public class VoyNGram {
 
 			int upperBound = (Integer) result.getObject("MAX");
 
-			while (midPointer <= upperBound) {
+			while (lowerBound <= upperBound) {
 
-				App.logger.info("Processing POIs starting from: " + lowerBound);
+				App.logger.info("Decoding POIs starting from: " + lowerBound);
 
-				decodeLabelForDict(" WHERE ID>" + lowerBound + " AND ID<="
-						+ midPointer);
+				decodePlaceEntitiesLabels(" WHERE ID>" + lowerBound
+						+ " AND ID<=" + interBound);
+				
+				App.logger.info("Generating NGrams for POIs starting from: " + lowerBound);
 
-				generateNgramForDict(" WHERE ID>" + lowerBound + " AND ID<="
-						+ midPointer);
+				generatePlaceEntitiesDictNGramForRange(" WHERE ID>"
+						+ lowerBound + " AND ID<=" + interBound,
+						VoyNGram.defaultNGramDegree);
 
-				midPointer += 10000;
-				lowerBound += 10000;
+				interBound += transactStep;
+				lowerBound += transactStep;
 
 			}
 
@@ -80,7 +94,12 @@ public class VoyNGram {
 
 	// /Note: All comma and parenthesis in the labels will be ignored during the
 	// ngram creation
-	private void generateNgramForDict(String labelIDRangeCondition) {
+	void generatePlaceEntitiesDictNGramForRange(
+			String labelIDRangeCondition, int ngramDegree) {
+
+		String label;
+		int label_id;
+		String updateSQL = "";
 
 		// Pull all labels from voylabel
 		java.sql.ResultSet result = db.execSelect(POSTGRES_GET_LABEL
@@ -90,17 +109,19 @@ public class VoyNGram {
 
 			while (result.next()) {
 
-				String label = (String) result.getObject(LABEL_COLUMN);
-				int label_id = (Integer) result.getObject(ID_COLUMN);
+				label = (String) result.getObject(LABEL_COLUMN);
+				label_id = (Integer) result.getObject(ID_COLUMN);
 				Set<String> ngramSet = new HashSet<String>(Utils.splitNgrams(
 						StringUtils.replace(label, ",", ""), ngramDegree));
 
 				for (String ngram : ngramSet)
-					db.execUpdate(POSTGRES_UPDATE_LABEL_NGRAM + "('"
+					updateSQL += POSTGRES_UPDATE_LABEL_NGRAM + "('"
 							+ StringUtils.replace(ngram, "'", "''") + "',"
-							+ label_id + ");");
+							+ label_id + "); ";
 
 			}
+
+			db.execUpdate(updateSQL);
 
 		} catch (SQLException ex) {
 
@@ -115,7 +136,11 @@ public class VoyNGram {
 	}
 
 	// /Decode the urls and labels in table voylabel
-	private void decodeLabelForDict(String labelIDRangeCondition) {
+	void decodePlaceEntitiesLabels(String labelIDRangeCondition) {
+
+		String label;
+		int label_id;
+		String updateSQL = "";
 
 		// Pull all labels from voylabel
 		java.sql.ResultSet result = db.execSelect(POSTGRES_GET_LABEL
@@ -125,28 +150,31 @@ public class VoyNGram {
 
 			while (result.next()) {
 
-				String label = (String) result.getObject(LABEL_COLUMN);
-				int label_id = (Integer) result.getObject(ID_COLUMN);
+				label = (String) result.getObject(LABEL_COLUMN);
+				label_id = (Integer) result.getObject(ID_COLUMN);
 
-				try {
+				if (label.contains("%"))
+					try {
 
-					label = new java.net.URI(label).getPath();
+						label = new java.net.URI(label).getPath();
 
-					// App.logger.info("Processing label:" + label_id + " " +
-					// label);
+						// App.logger.info("Processing label:" + label_id + " "
+						// +
+						// label);
 
-				} catch (URISyntaxException ex) {
+					} catch (URISyntaxException ex) {
 
-					App.logger.error("URI Syntax Exception: ", ex);
+						App.logger.error("URI Syntax Exception: ", ex);
 
-				}
+					}
 
-				db.execUpdate("UPDATE VOYLABEL SET LABEL='"
-						+ StringUtils.replace(
-								StringUtils.replace(label, "'", "''"), "_", " ")
-						+ "' WHERE ID=" + label_id);
+				updateSQL += "UPDATE VOYLABEL SET LABEL='"
+						+ StringUtils.replace(StringUtils.replace(label, "'", "''"),"_"," ") + "' WHERE ID=" + label_id + "; ";
+
 
 			}
+
+			db.execUpdate(updateSQL);
 
 		} catch (SQLException ex) {
 
@@ -160,98 +188,126 @@ public class VoyNGram {
 
 	}
 
-	public void chunkInputStream(String input) {
+	public String[] findEntityInInputStr(String input) {
 
 		long startTime = System.currentTimeMillis();
+		// List<String> EntityList = new LinkedList<String>();
+		Set<String> EntitySet = new LinkedHashSet<String>();
+		String[] entityNames;
 
-		String processed = StringUtils.replace(input, "'", " ");
-		String[] tokens = processed.split("[\\s.,?!/+()\"0-9]+");
+		tokens = input.split("[\\s.,?!/+()\"0-9]+");
 
 		int inputPtr = 0;
+		inputContextString = "";
 
 		while (inputPtr < tokens.length) {
 
-			List<String> outputTokens = new ArrayList<String>();
+			outputTokens = new ArrayList<String>();
 
-			// Add first token
-			if (tokens[inputPtr].length() > 0)
-				outputTokens.add(tokens[inputPtr]);
-
-			// Add current token as long as next token is capitalized
-			while (inputPtr < tokens.length - 1
-					&& tokens[Math.min(inputPtr + 1, tokens.length - 1)]
-							.length() > 0
-					&& Character.isUpperCase(tokens[Math.min(inputPtr + 1,
-							tokens.length - 1)].charAt(0)))
-				outputTokens.add(tokens[1 + inputPtr++]);
-
-			// Add another smaller cap token
-			if (++inputPtr < tokens.length && tokens[inputPtr].length() > 0)
-				outputTokens.add(tokens[inputPtr]);
-
-			while (inputPtr < tokens.length - 1
-					&& tokens[Math.min(inputPtr + 1, tokens.length - 1)]
-							.length() > 0
-					&& Character.isUpperCase(tokens[Math.min(inputPtr + 1,
-							tokens.length - 1)].charAt(0)))
-				outputTokens.add(tokens[1 + inputPtr++]);
-
-			// Skip tokens as long as next token is lowercase
-			while (inputPtr < tokens.length
-					&& tokens[Math.min(inputPtr + 1, tokens.length - 1)]
-							.length() > 0
-					&& !Character.isUpperCase(tokens[Math.min(inputPtr + 1,
-							tokens.length - 1)].charAt(0)))
-				inputPtr++;
-
-			App.logger.info(outputTokens.toString());
+			inputPtr = generateCaptipalizedContextChunk(inputPtr);
 			
-			
-			App.logger.info("Process one trunk time: "
-					+ (System.currentTimeMillis() - startTime));
-			
-			// getPOIInChunk(outputTokens.toArray(new
-			// String[outputTokens.size()]));
-			findNearestPOI(outputTokens
-					.toArray(new String[outputTokens.size()]));
+			inputContextString += StringUtils.join(outputTokens, " ") + ":";
+
+			// App.logger.info(outputTokens.toString());
+
+			// App.logger.info("Process one trunk time: "+
+			// (System.currentTimeMillis() - startTime));
+
+			EntitySet.addAll(findEntityInTokenChunk(
+					outputTokens.toArray(new String[outputTokens.size()]),
+					VoyNGram.defaultFuzzyMatchThreshold));
 
 		}
 
-		App.logger.info("Total time: "
-				+ (System.currentTimeMillis() - startTime));
+		App.logger.info("Find entities within "
+				+ (System.currentTimeMillis() - startTime) + "ms");
+
+		entityNames = EntitySet.toArray(new String[EntitySet.size()]);
+
+		App.logger.info(Arrays.toString(entityNames));
+
+		return entityNames;
 
 	}
 
-	public List<String> findNearestPOI(String[] tokens) {
+	private int generateCaptipalizedContextChunk(int inputPtr) {
 
+		// Add first token
+		if (inputPtr < tokens.length && tokens[inputPtr].length() > 0)
+			outputTokens.add(tokens[inputPtr++]);
+
+		// Add current token as long as it is capitalized
+		while (inputPtr < tokens.length && tokens[inputPtr].length() > 0
+				&& Character.isUpperCase(tokens[inputPtr].charAt(0)))
+			outputTokens.add(tokens[inputPtr++]);
+
+		// Add another smaller cap token
+		if (inputPtr < tokens.length && tokens[inputPtr].length() > 0)
+			outputTokens.add(tokens[inputPtr++]);
+
+		// Add current token as long as it is capitalized
+		while (inputPtr < tokens.length && tokens[inputPtr].length() > 0
+				&& Character.isUpperCase(tokens[inputPtr].charAt(0)))
+			outputTokens.add(tokens[inputPtr++]);
+
+		if (inputPtr < tokens.length && tokens[inputPtr].length() > 0)
+			outputTokens.add(tokens[inputPtr++]);
+
+		// Skip tokens as long as next token is lowercase
+		while (inputPtr < tokens.length
+				&& tokens[Math.min(inputPtr + 1, tokens.length - 1)].length() > 0
+				&& !Character.isUpperCase(tokens[Math.min(inputPtr + 1,
+						tokens.length - 1)].charAt(0)))
+			inputPtr++;
+
+		return inputPtr;
+
+	}
+
+	public List<String> findEntityInTokenChunk(String[] tokens,
+			float fuzzyMatchThreshold) {
+
+		String query, nextQuery;
+		boolean shouldTakeInNextToken;
+		int i, pointer = 0;
+		float nextMatchScore, matchScore;
 		List<String> NEList = new ArrayList<String>();
 
-		List<String> candidateSet = findCandidateEntitySet(tokens);
+		// String[] candidateSet = findCandidateEntityDB(tokens);
+		String[] candidateSet = findCandidateEntityInMemory(tokens,
+				VoyNGram.defaultNGramDegree,
+				VoyNGram.defaultShortlistCandidateNr);
 
-		int pointer = 0;
 		// long start_time = System.currentTimeMillis();
 
 		while (pointer < tokens.length) {
 
-			String query = "", nextQuery = "";
-			boolean shouldTakeInNextToken = true;
-			int i = 0;
-			float nextMatchScore = 0, matchScore = 0;
+			query = "";
+			nextQuery = "";
+			shouldTakeInNextToken = true;
+			i = 0;
+			nextMatchScore = 0;
+			matchScore = 0;
 
 			while (pointer + i < tokens.length && shouldTakeInNextToken) {
 
 				nextQuery += tokens[pointer + i];
-				nextMatchScore = findMaximumMatchScore(nextQuery, candidateSet);
-				
-				App.logger.info("Query: " + nextQuery + " Score: " + nextMatchScore);
+				nextMatchScore = findNearetStrMatchScore(nextQuery,
+						candidateSet);
+
+				// App.logger.info("Query: " + nextQuery + " Score: "+
+				// nextMatchScore);
 
 				if ((nextMatchScore < matchScore && JWStringDistance
 						.getDistance(query, nextMatchResult) > JWStringDistance
 						.getDistance(nextQuery, nextMatchResult))
-						|| (nextMatchScore < discardThreshold && !StringUtils
-								.left(nextQuery, 2).equals(
-										StringUtils.left(nextMatchResult, 2))))
+						|| (nextMatchScore < this.defaultDiscardThreshold && !StringUtils
+								.left(nextQuery,
+										this.defaultDiscardExcpCommonPrefix)
+								.equals(StringUtils.left(nextMatchResult,
+										this.defaultDiscardExcpCommonPrefix))))
 					shouldTakeInNextToken = false;
+
 				else {
 					query = nextQuery;
 					nextQuery = nextQuery + " ";
@@ -262,7 +318,7 @@ public class VoyNGram {
 
 			}
 
-			if (matchScore > acceptThreshold) {
+			if (matchScore > fuzzyMatchThreshold) {
 				// Return previous token
 				NEList.add(matchResult);
 				pointer += i;
@@ -273,23 +329,25 @@ public class VoyNGram {
 
 		// App.logger.info("Process time: "+ (System.currentTimeMillis() -
 		// start_time));
-		App.logger.info(NEList.toString());
+		// if (NEList.size() > 0)
+		// App.logger.info(NEList.toString());
 
 		return NEList;
 
 	}
 
-	private float findMaximumMatchScore(String query,
-			List<String> candidateEntitySet) {
+	private float findNearetStrMatchScore(String query,
+			String[] candidateEntitySet) {
 
 		float matchScore = 0;
+		float nextMatchScore;
 
 		for (String candidate : candidateEntitySet) {
 
-			float nextMatchScore = JWStringDistance.getDistance(query,
-					candidate);
-			
-			App.logger.info("Candidate: " + candidate + " Score: " + nextMatchScore);
+			nextMatchScore = JWStringDistance.getDistance(query, candidate);
+
+			// App.logger.info("Candidate: " + candidate + " Score: "+
+			// nextMatchScore);
 
 			if (nextMatchScore > matchScore) {
 				matchScore = nextMatchScore;
@@ -302,107 +360,147 @@ public class VoyNGram {
 
 	}
 
-	public List<String> getPOIInChunk(String[] tokens) {
+	/*
+	 * public String[] findCandidateEntityDB(String[] tokens, int ngramDegree,
+	 * int candidateListLength) {
+	 * 
+	 * List<String> candidateLabelList = new ArrayList<String>();
+	 * 
+	 * // List<String> ngramList = Utils.splitNgrams( //
+	 * StringUtils.replace(sentence, "'", "''"), ngramDegree);
+	 * 
+	 * String ngramStr = StringUtils.join( Utils.splitNgrams(tokens,
+	 * ngramDegree), "','");
+	 * 
+	 * ResultSet resultSet = db.execSelect("SELECT LABEL" + " FROM VOYLABEL L" +
+	 * " RIGHT JOIN" + " (SELECT LABEL_ID" + " FROM VOYLABEL_NGRAM" +
+	 * " WHERE NGRAM IN ('" + ngramStr + "')" + " GROUP BY LABEL_ID" +
+	 * " ORDER BY COUNT(1) DESC" + " LIMIT " + candidateListLength + ") N" +
+	 * " ON L.ID=N.LABEL_ID");
+	 * 
+	 * try {
+	 * 
+	 * while (resultSet.next()) candidateLabelList.add((String) resultSet
+	 * .getObject(LABEL_COLUMN));
+	 * 
+	 * } catch (SQLException ex) {
+	 * 
+	 * App.logger.error("SQL Exception: ", ex);
+	 * 
+	 * } finally {
+	 * 
+	 * db.closeResultSet(resultSet);
+	 * 
+	 * }
+	 * 
+	 * App.logger.info(candidateLabelList.toString());
+	 * 
+	 * return candidateLabelList .toArray(new
+	 * String[candidateLabelList.size()]);
+	 * 
+	 * }
+	 */
 
-		List<String> candidateSet;
-		List<String> POIList = new ArrayList<String>();
-
-		long start_time = System.currentTimeMillis();
-
-		candidateSet = findCandidateEntitySet(tokens);
-
-		App.logger.info("Query postgres for candidates: "
-				+ (System.currentTimeMillis() - start_time));
-
-		int pointer = 0;
-		while (pointer < tokens.length) {
-
-			String query = tokens[pointer];
-			int distance = getShortestDistance(query, candidateSet);
-			int i = 1;
-			int next_distance = 0;
-			boolean shouldTakeInNextToken = true;
-			matchResult = nextMatchResult;
-
-			while (pointer + i < tokens.length && shouldTakeInNextToken) {
-
-				String next_query = query + " " + tokens[pointer + i];
-				next_distance = getShortestDistance(next_query, candidateSet);
-
-				if (next_distance > distance || pointer + i >= tokens.length)
-					shouldTakeInNextToken = false;
-
-				else {
-					// Accept current token
-					distance = next_distance;
-					query = next_query;
-					matchResult = nextMatchResult;
-					// Continue take in next token
-					i++;
-				}
-
-			}
-
-			if (distance <= fuzzyMatchThreshold) {
-				// Return previous token
-				POIList.add(matchResult);
-				pointer += i;
-
-			} else
-				pointer++;
-
-		}
-
-		App.logger.info("Process time: "
-				+ (System.currentTimeMillis() - start_time));
-		App.logger.info(POIList.toString());
-
-		return POIList;
-
-	}
-
-	private int getShortestDistance(String query,
-			List<String> candidateEntitySet) {
-
-		int distance = 500;
-
-		for (String candidate : candidateEntitySet) {
-
-			int next_distance = StringUtils.getLevenshteinDistance(query,
-					candidate);
-
-			if (next_distance < distance) {
-				distance = next_distance;
-				nextMatchResult = candidate;
-			}
-
-		}
-
-		return distance;
-
-	}
-
-	public List<String> findCandidateEntitySet(String[] tokens) {
+	public String[] findCandidateEntityInMemory(String[] tokens,
+			int ngramDegree, int candidateListLength) {
 
 		List<String> candidateLabelList = new ArrayList<String>();
+		Map<String, Integer> labelOccurenceMap = new HashMap<String, Integer>(
+				10000);
 
-		// List<String> ngramList = Utils.splitNgrams(
-		// StringUtils.replace(sentence, "'", "''"), ngramDegree);
+		// long startTime2 = System.currentTimeMillis();
+		List<String> ngrams = Utils.splitNgrams(tokens, ngramDegree);
 
-		String ngramStr = StringUtils.join(
-				Utils.splitNgrams(tokens, ngramDegree), "','");
+		for (String ngram : ngrams) {
 
-		ResultSet resultSet = db.execSelect("SELECT LABEL" + " FROM VOYLABEL L"
-				+ " RIGHT JOIN" + " (SELECT LABEL_ID" + " FROM VOYLABEL_NGRAM"
-				+ " WHERE NGRAM IN ('" + ngramStr + "')" + " GROUP BY LABEL_ID"
-				+ " ORDER BY COUNT(1) DESC" + " LIMIT "
-				+ candidateListThreshold + ") N" + " ON L.ID=N.LABEL_ID");
+			if (labelNGramDict.containsKey(ngram))
+
+				for (String label : labelNGramDict.get(ngram)) {
+
+					if (labelOccurenceMap.containsKey(label))
+						labelOccurenceMap.put(label,
+								labelOccurenceMap.get(label) + 1);
+					else
+						labelOccurenceMap.put(label, 1);
+				}
+
+		}
+
+		// App.logger.info("Lookup memory graph time "+(System.currentTimeMillis()-startTime2));
+
+		candidateLabelList = Utils.getMostFrequentItemInMap(labelOccurenceMap,
+				candidateListLength);
+
+		// App.logger.info("Shortlist label name time "+(System.currentTimeMillis()-startTime2));
+
+		// App.logger.info(candidateLabelList.toString());
+
+		return candidateLabelList
+				.toArray(new String[candidateLabelList.size()]);
+
+	}
+
+	public void loadLabelIDNameMap() {
+
+		String labelName;
+		int labelIDKey;
+		labelIDNameMap = new HashMap<Integer, String>(340000);
+
+		long startTime = System.currentTimeMillis();
+
+		// Load LabelID-Name map
+		ResultSet resultSetLabels = db.execSelect(POSTGRES_GET_LABEL);
 
 		try {
 
-			while (resultSet.next())
-				candidateLabelList.add((String) resultSet
-						.getObject(LABEL_COLUMN));
+			while (resultSetLabels.next()) {
+
+				labelIDKey = (Integer) resultSetLabels.getObject(ID_COLUMN);
+				labelName = (String) resultSetLabels.getObject(LABEL_COLUMN);
+
+				labelIDNameMap.put(labelIDKey, labelName);
+
+			}
+
+		} catch (SQLException ex) {
+
+			App.logger.error("SQL Exception: ", ex);
+
+		} finally {
+			db.closeResultSet(resultSetLabels);
+		}
+
+		App.logger.info("Loaded " + labelIDNameMap.size() + " label names in "
+				+ (System.currentTimeMillis() - startTime));
+	}
+
+	public void loadPlaceEntitiesNGramDict() {
+
+		String ngramKey;
+		int labelID;
+
+		long startTime = System.currentTimeMillis();
+		// Load LabelID-Ngram map
+		ResultSet resultSet = db.execSelect(POSTGRES_GET_LABEL_NGRAM);
+
+		labelNGramDict = new HashMap<String, ArrayList<String>>(45000);
+
+		try {
+
+			while (resultSet.next()) {
+
+				ngramKey = (String) resultSet.getObject(NGRAM_COLUMN);
+				labelID = (Integer) resultSet.getObject(LABEL_ID_COLUMN);
+
+				if (labelNGramDict.containsKey(ngramKey))
+					labelNGramDict.get(ngramKey).add(
+							labelIDNameMap.get(labelID));
+				else {
+					ArrayList<String> labels = new ArrayList<String>();
+					labels.add(labelIDNameMap.get(labelID));
+					labelNGramDict.put(ngramKey, labels);
+				}
+			}
 
 		} catch (SQLException ex) {
 
@@ -414,9 +512,13 @@ public class VoyNGram {
 
 		}
 
-		App.logger.info(candidateLabelList.toString());
-		return candidateLabelList;
+		App.logger.info("Loaded " + labelNGramDict.size() + " ngrams in "
+				+ (System.currentTimeMillis() - startTime));
 
+	}
+
+	public String getInputContextString() {
+		return inputContextString;
 	}
 
 }
